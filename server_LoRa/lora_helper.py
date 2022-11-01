@@ -1,3 +1,5 @@
+import struct
+
 from LoRaRF import SX127x
 
 
@@ -47,3 +49,13 @@ def init_lora(
     LoRa.setSyncWord(syncWord)
 
     return LoRa
+
+
+def send_a_struct(
+    LoRa, struct_data, format_characters: str, endpacket_timeout: int = 0
+):
+    send_message = struct.pack(format_characters, *struct_data)
+    LoRa.beginPacket()
+    LoRa.put(send_message)
+    LoRa.endPacket(endpacket_timeout)
+    LoRa.wait()

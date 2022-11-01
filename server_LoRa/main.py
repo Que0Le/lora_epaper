@@ -1,19 +1,16 @@
 import os, sys
 from typing import List
-from xmlrpc.client import Boolean
+import time, random, string, struct, array, json
+# from xmlrpc.client import Boolean
 
-from lora_epaper.lora_helper import init_lora
+from LoRaRF import SX127x
+
+from lora_helper import init_lora
+from lora_server import *
 currentdir = os.path.dirname(os.path.realpath(__file__))
 sys.path.append(os.path.dirname(os.path.dirname(currentdir)))
-from LoRaRF import SX127x
-import time
-import random
-import string
-import struct
-import array
-import json
 
-from lora_server import *
+
 
 
 def main() -> int:
