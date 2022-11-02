@@ -1,6 +1,7 @@
 # This python file defines specific instructions to produce picture data for different boards
 # and display.
 
+SUPPORTED_DISPLAYS = ["2in13b_V3", "7in5b_V2"]
 
 def get_corrected_and_rotated_bmp_for_waveshare_epp(
     bmp_raw_data,
@@ -49,4 +50,4 @@ def get_corrected_and_rotated_bmp_for_waveshare_epp(
     return corrected_rotated_bmp
 
 
-
+# def
