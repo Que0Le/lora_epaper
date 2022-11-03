@@ -57,8 +57,8 @@ def main() -> int:
         # print(f"Begin trasmission for display_type: {display_type}")
         if display_type=="2in13b_V3":
             # Prepare data
-            bmp_black_corrected: List = get_corrected_and_rotated_bmp_for_waveshare_epp(get_bmp_raw_data_from_file("images/den.bmp"))
-            bmp_red_corrected: List = get_corrected_and_rotated_bmp_for_waveshare_epp(get_bmp_raw_data_from_file("images/do.bmp"))
+            bmp_black_corrected: List = get_corrected_and_rotated_bmp_for_waveshare_epp_2in13b_v2(get_bmp_raw_data_from_file("images/den.bmp"))
+            bmp_red_corrected: List = get_corrected_and_rotated_bmp_for_waveshare_epp_2in13b_v2(get_bmp_raw_data_from_file("images/do.bmp"))
             pic_data = [zlib.compress(bytes(bmp_black_corrected)), zlib.compress(bytes(bmp_red_corrected))]
             print(len(pic_data[0]), len(pic_data[1]))
             # Sent back accept:
@@ -94,12 +94,48 @@ def main() -> int:
                     send_a_struct(
                         LoRa=LoRa, struct_data=packet_struct, format_characters="BBBIIB100s", endpacket_timeout=250
                     )
-                    print(f"... sent {data_length} bytes {i+1}/{len(sub_strings)}, Transmit time: {LoRa.transmitTime():0.2f} ms")
+                    print(f"... sent {data_length} bytes {i+1}/{len(sub_strings)}, Transmit time: {LoRa.transmitTime():0.2f} byte/s")
                     # print("Transmit time: {0:0.2f} ms | Data rate: {1:0.2f} byte/s".format(LoRa.transmitTime(), LoRa.dataRate()))
 
                     time.sleep(0.2)
         elif display_type=="7in5_V2":
-            pass
+            # Prepare data
+            bmp_black_corrected: List = flip_and_rotate_bmp_raw_7in5_v2(bmp_raw_data=get_bmp_raw_data_from_file("images/tu-unmoeglich.bmp"))
+            pic_data = [zlib.compress(bytes(bmp_black_corrected))]
+            print(len(pic_data[0]))
+            # Sent back accept:
+            host_code = 0
+            flag = 0
+            is_encrypted = 0
+            is_compressed = 1
+            message_type = 0
+            request_status = 1
+            packet_struct = [
+                host_code, flag, is_encrypted, is_compressed, message_type, request_status, 
+                bytes(list(struct.pack("I", len(pic_data[0]))))
+            ]
+            send_a_struct(
+                LoRa=LoRa, struct_data=packet_struct, format_characters="BBBBBB30s", endpacket_timeout=250
+            )
+            time.sleep(1)
+            max_chars_length = 100
+            for data_type in range(0, 1):   # type 0: black image, type 1: red
+                sub_strings = [
+                    pic_data[data_type][i:i+max_chars_length] for i in range(0, len(pic_data[data_type]), max_chars_length)
+                ]
+                print(f"Datatype: {data_type}")
+                for i in range(0, len(sub_strings)):
+                    # Prepare struct data
+                    sub_str = sub_strings[i]
+                    total_length = 123456
+                    index_start = i*max_chars_length
+                    data_length = len(sub_str)
+                    packet_struct = [host_code, flag, data_type, total_length, index_start, data_length, sub_str]
+                    send_a_struct(
+                        LoRa=LoRa, struct_data=packet_struct, format_characters="BBBIIB100s", endpacket_timeout=250
+                    )
+                    print(f"... sent {data_length} bytes {i+1}/{len(sub_strings)}, Transmit time: {LoRa.transmitTime():0.2f} ms, Data rate: {LoRa.dataRate():0.2f} ms")
+                    time.sleep(0.2)
 
         ### Sent done status:
         host_code = 0
@@ -111,12 +147,6 @@ def main() -> int:
         packet_struct = [
             host_code, flag, is_encrypted, is_compressed, message_type, request_status, "".encode()
         ]
-        # packet_struct = [host_code, flag, 0, 3, "".encode()]
-        # send_message = struct.pack("BBBB30s", *packet_struct)
-        # LoRa.beginPacket()
-        # LoRa.put(send_message)
-        # LoRa.endPacket(250)
-        # LoRa.wait()
         send_a_struct(
             LoRa=LoRa, struct_data=packet_struct, format_characters="BBBBBB30s", endpacket_timeout=0
         )
