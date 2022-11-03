@@ -39,7 +39,6 @@
 #define DC_PIN          25
 #define CS_PIN          26
 #define BUSY_PIN        27
-
 class EpdIf {
 public:
     EpdIf(void);
@@ -50,7 +49,6 @@ public:
     static int  DigitalRead(int pin);
     static void DelayMs(unsigned int delaytime);
     static void SpiTransfer(unsigned char data);
-    static void SpiEnd(void);
 };
 
 #endif

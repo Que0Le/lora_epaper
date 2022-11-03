@@ -8,20 +8,19 @@
 #define dio0 2
 
 /*  */
-#include "epd2in13b_V3.h"
-#include "imagedata.h"
-#include "epdpaint.h"
+#include <epd7in5_V2.h>
+#include <miniz.h>
+
 #define COLORED 0
 #define UNCOLORED 1
-unsigned char image[2756/4];
+
 
 #include <EEPROM.h>
 #define EEPROM_SIZE 1
 
-#define BUFF_LEN_2_13B 2756 //212*104/8
+#define BUFF_LEN_7IN5 48000 //212*104/8
 unsigned char *BUFF_BLACK_IMAGE; 
-unsigned char *BUFF_RED_IMAGE; 
-unsigned char *BUFF_IMAGES[2];
+unsigned char *BUFF_COMPRESSED_BLACK_IMAGE; 
 
 int counter = 0;
 int resetCount = 0;
@@ -32,70 +31,6 @@ void setup_eeprom()
     EEPROM.write(0, 0);
     EEPROM.commit();
 }
-
-void setup()
-{
-    delay(1000);
-    Serial.begin(115200);
-    while (!Serial)
-        ;
-    setup_eeprom();
-
-    // Init mem
-    if ((BUFF_BLACK_IMAGE = (unsigned char *)malloc(BUFF_LEN_2_13B)) == NULL) {
-        printf("Failed alloc BUFF_BLACK_IMAGE...\r\n");
-        while (1);
-    }
-    if ((BUFF_RED_IMAGE = (unsigned char *)malloc(BUFF_LEN_2_13B)) == NULL) {
-        printf("Failed alloc BUFF_RED_IMAGE...\r\n");
-        while (1);
-    }
-    for (int i=0;i<BUFF_LEN_2_13B; i++) {
-        BUFF_RED_IMAGE[i] = 0;
-        BUFF_BLACK_IMAGE[i] = 0;
-    }
-    BUFF_IMAGES[0] = BUFF_BLACK_IMAGE;
-    BUFF_IMAGES[1] = BUFF_RED_IMAGE;
-    Serial.println("Allocated mem for back and red buffs");
-
-    /* Init loram */
-    LoRa.setPins(ss, rst, dio0);
-    while (!LoRa.begin(866E6))
-    {
-        Serial.println(".");
-        delay(500);
-    }
-    LoRa.setSyncWord(0xF3);    // ranges from 0-0xFF
-    Serial.println("LoRa Initializing OK!");
-
-    /*  */
-    // Serial.println("Init eink ...");
-
-    // Epd epd;
-    // if (epd.Init() != 0)
-    // {
-    //     Serial.print("e-Paper init failed");
-    //     return;
-    // }
-    // Paint paint(image, 104, 106);
-    /* This clears the SRAM of the e-paper display */
-    // epd.ClearFrame();
-    // epd.DisplayFrame(IMAGE_BLACK, IMAGE_RED);
-
-    // paint.Clear(UNCOLORED);
-    // paint.DrawStringAt(8, 20, "Hello world", &Font12, COLORED);
-    // epd.Display(image);//7
-
-    /* Deep sleep */
-    // epd.Sleep();
-    // epd.WaitUntilIdle();
-}
-
-int rq_sent = 0;
-// int trasmitting = 0;
-int request_status = -1;
-char buffer[256];
-unsigned int written_bytes[2] = {0, 0};
 
 struct packet_struct {
     unsigned char host_code;
@@ -110,15 +45,62 @@ struct packet_struct {
 struct control_struct {
     unsigned char host_code;
     unsigned char flag;
+    unsigned char is_encrypted;
+    unsigned char is_compressed;
     unsigned char message_type;    // 
     unsigned char request_status;  // 0: accepted and transmitting, 1: deny, 2: error, 3: done
     unsigned char message[30];     // 
 };
 
-packet_struct pkt;
-control_struct ctrl;
+packet_struct *pkt;
+control_struct *ctrl;
 #define DATA_TYPE_BLACK_IMAGE 0
 #define DATA_TYPE_RED_IMAGE 1
+
+
+void setup()
+{
+    delay(1000);
+    Serial.begin(115200);
+    while (!Serial)
+        ;
+    setup_eeprom();
+
+    log_d("Total heap: %d", ESP.getHeapSize());
+    log_d("Free heap: %d", ESP.getFreeHeap());
+    log_d("Total PSRAM: %d", ESP.getPsramSize());
+    log_d("Free PSRAM: %d", ESP.getFreePsram());
+
+    // Init mem
+    pkt = (packet_struct *)malloc(sizeof(packet_struct));
+    ctrl = (control_struct *)malloc(sizeof(control_struct));
+
+    if ((BUFF_BLACK_IMAGE = (unsigned char *)malloc(BUFF_LEN_7IN5)) == NULL) {
+        printf("Failed alloc BUFF_BLACK_IMAGE...\r\n");
+        while (1);
+    }
+    for (int i=0;i<BUFF_LEN_7IN5; i++) {
+        BUFF_BLACK_IMAGE[i] = 0;
+    }
+    Serial.println("Allocated mem for back buff");
+
+    /* Init loram */
+    LoRa.setPins(ss, rst, dio0);
+    while (!LoRa.begin(866E6))
+    {
+        Serial.println(".");
+        delay(500);
+    }
+    LoRa.setSyncWord(0xF3);    // ranges from 0-0xFF
+    Serial.println("LoRa Initializing OK!");
+
+}
+
+int rq_sent = 0;
+int request_status = -1;
+char buffer[256];
+unsigned int written_bytes = 0;
+unsigned int buff_comp_len = 0;
 
 void loop()
 {
@@ -126,7 +108,7 @@ void loop()
         // Send request
         Serial.println("sending request");
         LoRa.beginPacket();
-        LoRa.print("type=rqst_img;dev=epp_2_13_v3_B;uniq_id=epp_2_13_v3_B__nbr000");
+        LoRa.print("{\"msg_type\":\"rqst_img\",\"dsp_type\":\"2in13b_V3\",\"board\":\"esp32\",\"uniq_id\":\"nbr000\"}");
         LoRa.print(counter);
         LoRa.endPacket();
         Serial.println("request sent");
@@ -136,122 +118,87 @@ void loop()
     int packetSize = LoRa.parsePacket();
     if (packetSize)
     {
-        // Serial.println("Reading data ...");
         // read packet
         while (LoRa.available())
         {
             int nbr_byte = LoRa.readBytes(buffer, 256);
             // Serial.print("nbr_byte: ");
             if (nbr_byte==sizeof(control_struct)) { // control packet
-                memcpy(&ctrl, buffer, sizeof(control_struct));
-                request_status = ctrl.request_status;
-                Serial.print("Got control packet ... request_status: ");
-                Serial.println(request_status);
+                memcpy(ctrl, buffer, sizeof(control_struct));
+                unsigned int temp = 0;
+                memcpy(&temp, ctrl->message, 4);
+                buff_comp_len = temp; // somehow assign with "=" didn't work!
+                request_status = ctrl->request_status;
+                Serial.printf("Got control packet ... request_status: %d\n", request_status);
+                if (request_status == 1) {
+                    if ((BUFF_COMPRESSED_BLACK_IMAGE = (unsigned char *)malloc(buff_comp_len)) == NULL) {
+                        printf("Failed alloc BUFF_COMPRESSED_BLACK_IMAGE...\r\n");
+                        while (1);
+                    }
+                    Serial.printf("Allocated mem for COMPRESSED back (%d) buff\n", buff_comp_len);
+                }
             } else /* if (nbr_byte==sizeof(packet_struct)) */ {
-                memcpy(&pkt, buffer, sizeof(packet_struct));
-                Serial.println(pkt.data);
-                if (pkt.data_type>1 || pkt.index_start>=BUFF_LEN_2_13B)
+                memcpy(pkt, buffer, sizeof(packet_struct));
+                Serial.printf("buff_compressed_lengths[%d]=%d\n", pkt->data_type, buff_comp_len);
+                Serial.printf("... received data: index_start: %d, data_length: %d\n", pkt->index_start, pkt->data_length);
+                // Make sure we don't exceed the buffer
+                if (pkt->data_type>1 || pkt->index_start>=buff_comp_len)
                     break;
-                size_t bytes_to_copy = (pkt.index_start + pkt.data_length) >= BUFF_LEN_2_13B
-                    ? BUFF_LEN_2_13B - pkt.index_start
-                    : pkt.data_length;
-                memcpy(
-                    BUFF_IMAGES[pkt.data_type] + pkt.index_start,
-                    &pkt.data, bytes_to_copy
-                );
-                written_bytes[pkt.data_type] += bytes_to_copy;
-                // String LoRaData = LoRa.readString();
-                // Serial.println(LoRaData);
-                //
-                // String header = LoRaData.substring(0, 10)
+                // Calculate the correct bytes to copy. Can't always trust server!
+                size_t bytes_to_copy = (pkt->index_start + pkt->data_length) >= buff_comp_len
+                    ? buff_comp_len - pkt->index_start
+                    : pkt->data_length;
+                // Copy to compressed buffer
+                memcpy(BUFF_COMPRESSED_BLACK_IMAGE + pkt->index_start, pkt->data, bytes_to_copy);
+                written_bytes += bytes_to_copy;
             }
         }
     }
 
     // Done
     if (rq_sent==1 && request_status==3) {
-        Serial.println("BUFF_BLACK_IMAGE content: ");
-        for (int i=0; i<BUFF_LEN_2_13B; i++) {
-            Serial.printf("%c", BUFF_BLACK_IMAGE[i]);
+        int uncomp_success = 1;
+        Serial.printf("Receiving done. Start decompressing data ...\n");
+        Serial.printf("\nwritten_bytes COMPRESSSED BLACK: %d\n", written_bytes);
+
+        uLong uncomp_len = BUFF_LEN_7IN5;
+        uint total_succeeded = 0;
+        uint step = 0;
+        int cmp_status = 0;
+        cmp_status = uncompress(
+            BUFF_BLACK_IMAGE, &uncomp_len, 
+            (const unsigned char *)BUFF_COMPRESSED_BLACK_IMAGE, (uLong)buff_comp_len
+        );
+
+        total_succeeded += (cmp_status == Z_OK);
+        if (cmp_status != Z_OK) {
+            Serial.printf("uncompress failed!\n");
+            uncomp_success = 0;
+        } else {
+            Serial.printf("Decompressed from %u to %u bytes\n", (mz_uint32)buff_comp_len, (mz_uint32)uncomp_len);
         }
-        Serial.print("\n#####################################\n");
-        Serial.println("BUFF_RED_IMAGE content: ");
-        for (int i=0; i<BUFF_LEN_2_13B; i++) {
-            Serial.printf("%c", BUFF_RED_IMAGE[i]);
-        }
+
         rq_sent = 0;
-
-        Serial.print("\nwritten_bytes BLACK: ");
-        Serial.println(written_bytes[0]);
-        Serial.print("written_bytes RED: ");
-        Serial.println(written_bytes[1]);
-        // Print
-        // Start e-paper
-        Epd epd;
-        Serial.println("\nInit eink ...");
-        if (epd.Init() != 0)
-        {
-            Serial.print("e-Paper init failed");
-            return;
-        }
-        Serial.println("Inited eink ...");
-        epd.ClearFrame();    // clears the SRAM of the e-paper display
-        epd.DisplayFrame(BUFF_BLACK_IMAGE, BUFF_RED_IMAGE);
-        Serial.println("E paper done!");
-        epd.Sleep();    // Deep sleep
-    }
-    // delay(10000);
-
-
-/* 
-    // try to parse packet
-    int packetSize = LoRa.parsePacket();
-    if (packetSize)
-    {
-        // received a packet
-        Serial.print("Received packet '");
-
-        // read packet
-        while (LoRa.available())
-        {
-            String LoRaData = LoRa.readString();
-            Serial.print(LoRaData);
-        }
-
-        // print RSSI of packet
-        Serial.print("' with RSSI ");
-        Serial.println(LoRa.packetRssi());
-
-        // Start e-paper
-        Epd epd;
-        Serial.println("Init eink ...");
-        if (epd.Init() != 0)
-        {
-            Serial.print("e-Paper init failed");
-            return;
-        }
-        Serial.println("Inited eink ...");
-        epd.ClearFrame();    // clears the SRAM of the e-paper display
-        // epd.DisplayFrame(IMAGE_BLACK, IMAGE_RED);
-        Serial.println("E paper done!");
-        epd.Sleep();    // Deep sleep
-        Serial.println("E paper slept!");
-        // Update status
-        int oldStatus = EEPROM.read(0);
-        EEPROM.write(0, oldStatus+1);
-        EEPROM.commit();
-
-        resetCount++;
-        ESP.restart();
-    } else {
-        if (counter % 5000 == 0)
-        {
-            int oldStatus = EEPROM.read(0);
-            Serial.print("oldStatus:  ");
-            Serial.print(oldStatus);
-            Serial.print(" No packet: ");
-            Serial.println(counter / 1000);
+        if (uncomp_success) {
+            Serial.print("\nwritten_bytes BLACK: ");
+            Serial.println(written_bytes);
+            // Print
+            // Start e-paper
+            Epd epd;
+            Serial.println("\nInit eink ...");
+            if (epd.Init() != 0)
+            {
+                Serial.print("e-Paper init failed");
+                return;
+            }
+            Serial.println("Inited eink ...");
+            epd.Clear();    // clears the SRAM of the e-paper display
+            epd.DisplayFrame(BUFF_BLACK_IMAGE);
+            Serial.println("E paper done!");
+            epd.Sleep();    // Deep sleep
+            delay(500000);
+            Serial.println("Restarting ...!");
+            ESP.restart();
         }
     }
-     */
 }

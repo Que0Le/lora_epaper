@@ -1,9 +1,9 @@
 /**
- *  @filename   :   epd2in13b.h
- *  @brief      :   Header file for Dual-color e-paper library epd2in13b.cpp
+ *  @filename   :   epd7in5.h
+ *  @brief      :   Header file for e-paper library epd7in5.cpp
  *  @author     :   Yehui from Waveshare
  *  
- *  Copyright (C) Waveshare     July 31 2017
+ *  Copyright (C) Waveshare     August 10 2017
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documnetation files (the "Software"), to deal
@@ -24,43 +24,43 @@
  * THE SOFTWARE.
  */
 
-#ifndef EPD2IN13B_H
-#define EPD2IN13B_H
+#ifndef EPD7IN5_V2_H
+#define EPD7IN5_V2_H
 
 #include "epdif.h"
 
 // Display resolution
-#define EPD_WIDTH       104
-#define EPD_HEIGHT      212
-
-
+#define EPD_WIDTH       800
+#define EPD_HEIGHT      480
 
 class Epd : EpdIf {
 public:
-    int width;
-    int height;
-    int count;
-    
     Epd();
     ~Epd();
     int  Init(void);
-    void SendCommand(unsigned char command);
-    void SendData(unsigned char data);
     void WaitUntilIdle(void);
     void Reset(void);
-    void DisplayFrame(const unsigned char* frame_buffer_black, const unsigned char* frame_buffer_red);
-    void DisplayFrame(void);
-    void Display(const unsigned char* frame_buffer) ;
-    void ClearFrame(void);
+    void SetLut(void);
+    void DisplayFrame(const unsigned char* frame_buffer);
+    void SendCommand(unsigned char command);
+    void SendData(unsigned char data);
     void Sleep(void);
-
+    void Clear(void);
+    //void Epd::Displaypart(const unsigned char* pbuffer, unsigned long Start_X, unsigned long Start_Y,unsigned long END_X,unsigned long END_Y);
+    void Displaypart(const unsigned char* pbuffer, unsigned long Start_X, unsigned long Start_Y,unsigned long END_X,unsigned long END_Y);
+ 
 private:
     unsigned int reset_pin;
     unsigned int dc_pin;
     unsigned int cs_pin;
     unsigned int busy_pin;
+    unsigned long width;
+    unsigned long height;
+
+	void SetLut(unsigned char *lut);
+    void SetLut_by_host(unsigned char *lut_vcom, unsigned char *lut_ww, unsigned char *lut_bw, unsigned char *lut_wb, unsigned char *lut_bb);
 };
 
-#endif /* EPD2IN13B_H */
+#endif /* EPD7IN5_H */
 
 /* END OF FILE */
