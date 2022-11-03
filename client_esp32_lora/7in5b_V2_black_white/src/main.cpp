@@ -108,7 +108,7 @@ void loop()
         // Send request
         Serial.println("sending request");
         LoRa.beginPacket();
-        LoRa.print("{\"msg_type\":\"rqst_img\",\"dsp_type\":\"2in13b_V3\",\"board\":\"esp32\",\"uniq_id\":\"nbr000\"}");
+        LoRa.print("{\"msg_type\":\"rqst_img\",\"dsp_type\":\"7in5_V2\",\"board\":\"esp32\",\"uniq_id\":\"nbr000\"}");
         LoRa.print(counter);
         LoRa.endPacket();
         Serial.println("request sent");
@@ -127,7 +127,7 @@ void loop()
                 memcpy(ctrl, buffer, sizeof(control_struct));
                 unsigned int temp = 0;
                 memcpy(&temp, ctrl->message, 4);
-                buff_comp_len = temp; // somehow assign with "=" didn't work!
+                buff_comp_len += temp; // TODO: somehow assign with "=" didn't work!
                 request_status = ctrl->request_status;
                 Serial.printf("Got control packet ... request_status: %d\n", request_status);
                 if (request_status == 1) {
@@ -139,7 +139,6 @@ void loop()
                 }
             } else /* if (nbr_byte==sizeof(packet_struct)) */ {
                 memcpy(pkt, buffer, sizeof(packet_struct));
-                Serial.printf("buff_compressed_lengths[%d]=%d\n", pkt->data_type, buff_comp_len);
                 Serial.printf("... received data: index_start: %d, data_length: %d\n", pkt->index_start, pkt->data_length);
                 // Make sure we don't exceed the buffer
                 if (pkt->data_type>1 || pkt->index_start>=buff_comp_len)
@@ -159,7 +158,7 @@ void loop()
     if (rq_sent==1 && request_status==3) {
         int uncomp_success = 1;
         Serial.printf("Receiving done. Start decompressing data ...\n");
-        Serial.printf("\nwritten_bytes COMPRESSSED BLACK: %d\n", written_bytes);
+        Serial.printf("\nwritten_bytes COMPRESSSED BLACK: %d of %d\n", written_bytes, buff_comp_len);
 
         uLong uncomp_len = BUFF_LEN_7IN5;
         uint total_succeeded = 0;
