@@ -195,7 +195,7 @@ void loop()
             epd.DisplayFrame(BUFF_BLACK_IMAGE);
             Serial.println("E paper done!");
             epd.Sleep();    // Deep sleep
-            delay(500000);
+            delay(5000);
             Serial.println("Restarting ...!");
             ESP.restart();
         }
