@@ -94,15 +94,16 @@ def main() -> int:
                     send_a_struct(
                         LoRa=LoRa, struct_data=packet_struct, format_characters="BBBIIB100s", endpacket_timeout=250
                     )
-                    print(f"... sent {data_length} bytes {i+1}/{len(sub_strings)}, Transmit time: {LoRa.transmitTime():0.2f} byte/s")
-                    # print("Transmit time: {0:0.2f} ms | Data rate: {1:0.2f} byte/s".format(LoRa.transmitTime(), LoRa.dataRate()))
+                    print(f"... sent {data_length} bytes {i+1}/{len(sub_strings)}, Transmit time: {LoRa.transmitTime():0.2f} ms, Data rate: {LoRa.dataRate():0.2f} bytes/s")
+                    time.sleep(0.4)
 
-                    time.sleep(0.2)
         elif display_type=="7in5_V2":
             # Prepare data
-            bmp_black_corrected: List = flip_and_rotate_bmp_raw_7in5_v2(bmp_raw_data=get_bmp_raw_data_from_file("images/tu-unmoeglich.bmp"))
+            filepath_to_send = random.choice(list_file_with_filter("images", "800x480_1bit", "bmp"))
+            bmp_raw_data = get_bmp_raw_data_from_file(filepath=filepath_to_send)
+            bmp_black_corrected: List = flip_and_rotate_bmp_raw_7in5_v2(bmp_raw_data)
             pic_data = [zlib.compress(bytes(bmp_black_corrected))]
-            print(len(pic_data[0]))
+            print(f"filepath_to_send: {filepath_to_send}, compressed to: {len(pic_data[0])} bytes" )
             # Sent back accept:
             host_code = 0
             flag = 0
@@ -134,9 +135,10 @@ def main() -> int:
                     send_a_struct(
                         LoRa=LoRa, struct_data=packet_struct, format_characters="BBBIIB100s", endpacket_timeout=250
                     )
-                    print(f"... sent {data_length} bytes {i+1}/{len(sub_strings)}, Transmit time: {LoRa.transmitTime():0.2f} ms, Data rate: {LoRa.dataRate():0.2f} ms")
-                    time.sleep(0.2)
+                    print(f"... sent {data_length} bytes {i+1}/{len(sub_strings)}, Transmit time: {LoRa.transmitTime():0.2f} ms, Data rate: {LoRa.dataRate():0.2f} bytes/s")
+                    time.sleep(0.4)
 
+        
         ### Sent done status:
         host_code = 0
         flag = 0
