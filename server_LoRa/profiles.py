@@ -1,6 +1,5 @@
 # This python file defines specific instructions to produce picture data for different boards
 # and displays.
-from typing import List, Tuple
 import zlib, random
 
 from utils import *
@@ -78,19 +77,19 @@ def flip_and_rotate_bmp_raw_7in5_v2(bmp_raw_data, R: int = 480, C: int = 100):
     return bmp_corrected
 
 
-def get_data_for_request(board_type: str, display_type: str) -> Tuple(List, int, int, int):
+def get_data_for_request(board_type: str, display_type: str) -> tuple(list, int, int, int):
     """ 
     Read picture data, convert in appropriate format for `display_type` and `board_type`
-    @retun Tupple(chunks[], len(chunks), total bytes, compressed bytes)
+    @retun Tupple(chunks[], size of chunks[], total bytes, compressed bytes)
     """
     chunks = []
     total_length = 0
     compressed_length = 0
     if display_type=="2in13b_V3":
         # Prepare data
-        bmp_black_corrected: List = get_corrected_and_rotated_bmp_for_waveshare_epp_2in13b_v2(
+        bmp_black_corrected: list = get_corrected_and_rotated_bmp_for_waveshare_epp_2in13b_v2(
             get_bmp_raw_data_from_file("images/den.bmp"))
-        bmp_red_corrected: List = get_corrected_and_rotated_bmp_for_waveshare_epp_2in13b_v2(
+        bmp_red_corrected: list = get_corrected_and_rotated_bmp_for_waveshare_epp_2in13b_v2(
             get_bmp_raw_data_from_file("images/do.bmp"))
         total_length = len(bmp_black_corrected) + len(bmp_red_corrected)
         pic_data = [
@@ -108,7 +107,7 @@ def get_data_for_request(board_type: str, display_type: str) -> Tuple(List, int,
         # Prepare data
         filepath_to_send = random.choice(list_file_with_filter("images", "800x480_1bit", "bmp"))
         bmp_raw_data = get_bmp_raw_data_from_file(filepath=filepath_to_send)
-        bmp_black_corrected: List = flip_and_rotate_bmp_raw_7in5_v2(bmp_raw_data)
+        bmp_black_corrected: list = flip_and_rotate_bmp_raw_7in5_v2(bmp_raw_data)
         total_length = len(bmp_black_corrected)
         pic_data = [zlib.compress(bytes(bmp_black_corrected))]
         compressed_length = len(pic_data[0])
@@ -120,4 +119,7 @@ def get_data_for_request(board_type: str, display_type: str) -> Tuple(List, int,
             ]
             chunks.append(shards)
 
-    return Tuple(chunks, len(chunks), total_length, compressed_length)
+    return tuple(
+        chunks, [len(chunk) for chunk in chunks],
+        total_length, compressed_length
+    )

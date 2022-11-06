@@ -1,5 +1,4 @@
 import os, sys, logging
-from typing import List
 import time, random, string, struct, array, json, zlib, datetime
 # from xmlrpc.client import Boolean
 
@@ -76,10 +75,16 @@ def main() -> int:
             # 1. prepare image: split data in chunk, each chunk contains shards of max_char bytes
             # 2. send number of chunk and shard back, and wait for request of shard from client.
             # 3. Set param
-            current_session = random.randint(1, 127)
-            last_active_time = datetime.datetime.now()
-            chunks, nbr_chunks, total_length, compressed_length = get_data_for_request(
+            chunks, chunk_sizes, total_length, compressed_length = get_data_for_request(
                 board_type=board_type, display_type=display_type)
+            rand_int = random.randint(1, 127)
+            if send_accept_img_request(
+                LoRa=LoRa, chunk_sizes=chunk_sizes, host_code=this_host_code, flag=0,
+                session_id=rand_int, is_encrypted=1, is_compressed=1, request_status=1
+                ):
+                current_session = rand_int
+                last_active_time = datetime.datetime.now()
+
 
         if msg_type == "rqst_done" and current_session >= 1:
             chunks = []
