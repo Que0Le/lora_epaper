@@ -1,5 +1,9 @@
 # This python file defines specific instructions to produce picture data for different boards
 # and displays.
+import zlib, random
+
+from utils import *
+from config import config as cfg
 
 SUPPORTED_DISPLAYS = ["2in13b_V3", "7in5_V2"]
 
@@ -71,3 +75,51 @@ def flip_and_rotate_bmp_raw_7in5_v2(bmp_raw_data, R: int = 480, C: int = 100):
             bmp_corrected[(R-r-1)*C+col] = temp_byte
 
     return bmp_corrected
+
+
+def get_data_for_request(board_type: str, display_type: str) -> tuple(list, int, int, int):
+    """ 
+    Read picture data, convert in appropriate format for `display_type` and `board_type`
+    @retun Tupple(chunks[], size of chunks[], total bytes, compressed bytes)
+    """
+    chunks = []
+    total_length = 0
+    compressed_length = 0
+    if display_type=="2in13b_V3":
+        # Prepare data
+        bmp_black_corrected: list = get_corrected_and_rotated_bmp_for_waveshare_epp_2in13b_v2(
+            get_bmp_raw_data_from_file("images/den.bmp"))
+        bmp_red_corrected: list = get_corrected_and_rotated_bmp_for_waveshare_epp_2in13b_v2(
+            get_bmp_raw_data_from_file("images/do.bmp"))
+        total_length = len(bmp_black_corrected) + len(bmp_red_corrected)
+        pic_data = [
+            zlib.compress(bytes(bmp_black_corrected)), zlib.compress(bytes(bmp_red_corrected))
+        ]
+        compressed_length = len(pic_data[0]) + len(pic_data[1])
+        # Chunk 0: black image, Chunk 1: red
+        for chunk_th in range(0, 2):   
+            shards = [
+                pic_data[chunk_th][i:i+cfg.MAX_CHAR_LORA_PAYLOAD] for i in range(0, len(pic_data[chunk_th]), cfg.MAX_CHAR_LORA_PAYLOAD)
+            ]
+            chunks.append(shards)
+
+    elif display_type=="7in5_V2":
+        # Prepare data
+        filepath_to_send = random.choice(list_file_with_filter("images", "800x480_1bit", "bmp"))
+        bmp_raw_data = get_bmp_raw_data_from_file(filepath=filepath_to_send)
+        bmp_black_corrected: list = flip_and_rotate_bmp_raw_7in5_v2(bmp_raw_data)
+        total_length = len(bmp_black_corrected)
+        pic_data = [zlib.compress(bytes(bmp_black_corrected))]
+        compressed_length = len(pic_data[0])
+        # print(f"filepath_to_send: {filepath_to_send}, compressed to: {len(pic_data[0])} bytes" )
+
+        for chunk_th in range(0, 1):
+            shards = [
+                pic_data[chunk_th][i:i+cfg.MAX_CHAR_LORA_PAYLOAD] for i in range(0, len(pic_data[chunk_th]), cfg.MAX_CHAR_LORA_PAYLOAD)
+            ]
+            chunks.append(shards)
+
+    return tuple(
+        chunks, [len(chunk) for chunk in chunks],
+        total_length, compressed_length
+    )
