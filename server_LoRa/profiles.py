@@ -4,6 +4,7 @@ import zlib, random
 
 from utils import *
 from config import config as cfg
+from typing import Tuple
 
 SUPPORTED_DISPLAYS = ["2in13b_V3", "7in5_V2"]
 
@@ -77,7 +78,7 @@ def flip_and_rotate_bmp_raw_7in5_v2(bmp_raw_data, R: int = 480, C: int = 100):
     return bmp_corrected
 
 
-def get_data_for_request(board_type: str, display_type: str) -> tuple(list, int, int, int):
+def get_data_for_request(board_type: str, display_type: str) -> Tuple[list, int, int, int]:
     """ 
     Read picture data, convert in appropriate format for `display_type` and `board_type`
     @retun Tupple(chunks[], size of chunks[], total bytes, compressed bytes)
@@ -119,7 +120,4 @@ def get_data_for_request(board_type: str, display_type: str) -> tuple(list, int,
             ]
             chunks.append(shards)
 
-    return tuple(
-        chunks, [len(chunk) for chunk in chunks],
-        total_length, compressed_length
-    )
+    return chunks, [len(chunk) for chunk in chunks], total_length, compressed_length
