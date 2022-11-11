@@ -2,6 +2,7 @@
 #include <LoRa.h>
 #include <SPI.h>
 
+#include "helpers.h"
 // define the pins used by the transceiver module
 #define ss 5
 #define rst 14
@@ -16,11 +17,12 @@
 #define EEPROM_SIZE 1
 
 #define BUFF_LEN_7IN5 48000     //  800*480/8
-#define HOST_CODE 123
+#define HOST_CODE 123           // Host ID
 #define THIS_CLIENT_ID 2
+#define THIS_CLIENT_CHUNKS_NBR 1    // in how many chunks is the data split 
 
-unsigned char *BUFF_BLACK_IMAGE; 
-unsigned char *BUFF_COMPRESSED_BLACK_IMAGE; 
+unsigned char **BUFF_IMAGES; 
+unsigned char **BUFF_COMPRESSED_IMAGES; 
 
 int counter = 0;
 int resetCount = 0;
@@ -33,21 +35,21 @@ void setup_eeprom()
 }
 
 struct packet_struct {
-    unsigned int host_code;
+    unsigned short int host_code;
     unsigned char flag;
-    unsigned int client_id;    // 0->black image, 1->red image
-    unsigned int session_id;  // total length of file to transmitt
+    unsigned short int client_id;    // 0->black image, 1->red image
+    unsigned short int session_id;  // total length of file to transmitt
     unsigned char chunk_id;   // where does it start (0->total_length-1)
-    unsigned int shard_id;  // length of this fragment
+    unsigned short int shard_id;  // length of this fragment
     unsigned char shard_length;
     char data[100];
 };
 
 struct control_struct {
-    unsigned int host_code;
+    unsigned short int host_code;
     unsigned char flag;
-    unsigned int client_id;
-    unsigned int session_id;
+    unsigned short int client_id;
+    unsigned short int session_id;
     unsigned char is_encrypted;
     unsigned char is_compressed;
     unsigned char request_status;  // 1: accepted and transmitting, 2: deny, 3: abort, 4: done
@@ -77,15 +79,23 @@ void setup()
     // Init mem
     pkt = (packet_struct *)malloc(sizeof(packet_struct));
     ctrl = (control_struct *)malloc(sizeof(control_struct));
-
-    if ((BUFF_BLACK_IMAGE = (unsigned char *)malloc(BUFF_LEN_7IN5)) == NULL) {
-        printf("Failed alloc BUFF_BLACK_IMAGE...\r\n");
-        while (1);
+    // allocate 2-d array mem: https://www.geeksforgeeks.org/dynamically-allocate-2d-array-c/
+    BUFF_COMPRESSED_IMAGES = (unsigned char**)malloc(1 * sizeof(unsigned char*));
+    BUFF_IMAGES = (unsigned char**)malloc(1 * sizeof(unsigned char*));
+    for (int i = 0; i < 1; i++) {
+        BUFF_IMAGES[i] = (unsigned char *)malloc(BUFF_LEN_7IN5 * sizeof(unsigned char));
+        if (!BUFF_IMAGES[i]) {
+            Serial.printf("Failed alloc mem for BUFF_IMAGES, i=%d\n", i);
+        }
     }
-    for (int i=0;i<BUFF_LEN_7IN5; i++) {
-        BUFF_BLACK_IMAGE[i] = 0;
-    }
-    Serial.println("Allocated mem for back buff");
+    // if ((BUFF_BLACK_IMAGE = (unsigned char *)malloc(BUFF_LEN_7IN5)) == NULL) {
+    //     printf("Failed alloc BUFF_BLACK_IMAGE...\r\n");
+    //     while (1);
+    // }
+    // for (int i=0;i<BUFF_LEN_7IN5; i++) {
+    //     BUFF_BLACK_IMAGE[i] = 0;
+    // }
+    Serial.printf("Allocated mem for BUFF_IMAGES, length=%d\n", BUFF_LEN_7IN5);
 
     /* Init loram */
     LoRa.setPins(ss, rst, dio0);
@@ -104,9 +114,9 @@ int flag = -1;
 int request_status = -1;
 char buffer[256];
 unsigned int written_bytes = 0;
-// unsigned int buff_comp_len = 0;
-unsigned char total_chunks = 0;
-unsigned int total_shards[1] = {0};
+unsigned char shard_max_length = 0;
+unsigned char nbr_chunks = 0;
+unsigned int nbr_shards[1] = {0};
 unsigned int session_id = 0;
 int current_chunk = -1;
 int current_shard = -1;
@@ -117,19 +127,23 @@ void loop()
         // Send request
         LoRa.beginPacket();
         LoRa.print("{\"msg_type\":\"img_rqst\",\"hid\":\"123\",\"cid\":1,\"sid\":0,\"dsp_type\":\"7in5_V2\",\"board\":\"esp32\"}");
-        // LoRa.print(counter);
         LoRa.endPacket();
         Serial.println("Requested new image.");
         img_rqst_sent = 1;
     }
 
     if (img_rqst_sent == 1 && flag == 1 && session_id > 0) {
-        // Send request for the next chunk
+        if (current_chunk >= THIS_CLIENT_CHUNKS_NBR && current_shard >= nbr_shards[current_chunk]) {
+            // Done. TODO: send done message
+            // TODO: clean up
+        }
+        // We Send request for the next chunk
         LoRa.beginPacket();
-        LoRa.print("{\"msg_type\":\"shard_rqst\",\"hid\":\"123\",\"cid\":1,\"sid\":0,\"dsp_type\":\"7in5_V2\",\"board\":\"esp32\"}");
-        // LoRa.print(counter);
+        LoRa.printf(
+            "{\"msg_type\":\"shard_rqst\",\"hid\":%d,\"cid\":%d,\"sid\":%d,\"chid\":%d,\"shid\":%d}",
+            123, THIS_CLIENT_ID, session_id, current_chunk, current_shard);
         LoRa.endPacket();
-        Serial.println("Requested new image."); 
+        Serial.printf("Requested chunk=%d shard=%d\n.", current_chunk, current_shard); 
     }
 
     // Handle message
@@ -153,37 +167,62 @@ void loop()
                 // Extract approvement data
                 unsigned int chunk_sizes_bytes = 0;
                 memcpy(&chunk_sizes_bytes, ctrl->message, 4);
-                total_chunks = 1;
                 // Get number of shards
                 if (chunk_sizes_bytes % ctrl->shard_max_length > 0) {
-                    total_shards[0] = chunk_sizes_bytes % ctrl->shard_max_length + 1;
+                    nbr_shards[0] = chunk_sizes_bytes % ctrl->shard_max_length + 1;
                 } else {
-                    total_shards[0] = chunk_sizes_bytes % ctrl->shard_max_length;
+                    nbr_shards[0] = chunk_sizes_bytes % ctrl->shard_max_length;
                 }
                 request_status = ctrl->request_status;
                 flag = ctrl->flag;
                 session_id = ctrl->session_id;
+                // Allocate memory for the compressed data
+                for (int i = 0; i < THIS_CLIENT_CHUNKS_NBR; i++) {
+                    BUFF_COMPRESSED_IMAGES[i] = (unsigned char *)malloc(nbr_shards[i] * shard_max_length * sizeof(unsigned char));
+                    if (!BUFF_COMPRESSED_IMAGES[i]) {
+                        Serial.printf("Failed alloc mem for BUFF_COMPRESSED_IMAGES, i=%d\n", i);
+                    }
+                }
+                current_chunk = current_shard = 0;
                 return;
             } else if (ctrl->request_status == 2) {
                 Serial.println("Server denied the image request.!");
                 delay(1000);
+                // TODO: cleanup
+                reset_vars(&img_rqst_sent, &flag, &request_status, &written_bytes, &shard_max_length,
+                           &nbr_chunks, &session_id, &current_chunk, &current_shard);
+                reset_buffs();
                 return;
             } else if (ctrl->request_status == 3) {
                 Serial.println("Server aborted the image request.!");
-                img_rqst_sent = 1;
-                request_status = -1;
-                written_bytes = 0;
-                current_chunk =-1;
-                current_shard =-1;
-                total_shards[0] = 0;
-                session_id = 0;
-                flag = -1;
-                free(BUFF_COMPRESSED_BLACK_IMAGE);
+                reset_vars(&img_rqst_sent, &flag, &request_status, &written_bytes, &shard_max_length,
+                           &nbr_chunks, &session_id, &current_chunk, &current_shard);
+                reset_buffs();
                 return;
             }
         } else /* if (nbr_byte==sizeof(packet_struct)) */ {     // somehow size of pkt is not catched here
-
-
+            memcpy(pkt, buffer, sizeof(packet_struct));
+            Serial.printf("... received data: chunk_id: %d, shard_id: %d\n", pkt->chunk_id, pkt->shard_id);
+            // Make sure we don't exceed the buffer
+            if (pkt->chunk_id >= THIS_CLIENT_CHUNKS_NBR || pkt->shard_id>=nbr_shards[pkt->chunk_id])
+                return;
+            // Calculate the correct bytes to copy. Can't always trust server!
+            size_t bytes_to_copy = (pkt->shard_id*ctrl->shard_max_length + pkt->shard_length) >= ctrl->shard_max_length
+                ? ctrl->shard_max_length - pkt->shard_id*ctrl->shard_max_length
+                : pkt->shard_length;
+            memcpy((void *)BUFF_COMPRESSED_IMAGES[pkt->chunk_id][pkt->shard_id*ctrl->shard_max_length], pkt->data, bytes_to_copy);
+            written_bytes += bytes_to_copy;
+            if (current_shard == nbr_shards[current_chunk] - 1) {
+                if (current_chunk < nbr_chunks -1) {
+                    current_chunk++;
+                    current_shard = 0;
+                } else {
+                    // TODO: send done signal
+                    // TODO: clean up
+                }
+            } else {
+                current_shard++;
+            }
         }
     }
 
