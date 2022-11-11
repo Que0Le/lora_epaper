@@ -37,7 +37,7 @@ def send_accept_img_request(
     ]
     send_a_struct(
         LoRa=LoRa, struct_data=packet_struct,
-        format_characters="IBIIBBBB30s", endpacket_timeout=250
+        format_characters="HBHHBBBB30s", endpacket_timeout=250
     )
     return 1
 
@@ -49,7 +49,7 @@ def send_shard(
 ) -> int:
     packet_struct = [host_code, flag, client_id, session_id, chunk_id, shard_id, len(shard), shard]
     send_a_struct(
-        LoRa=LoRa, struct_data=packet_struct, format_characters="IBIIBIB100s", endpacket_timeout=250
+        LoRa=LoRa, struct_data=packet_struct, format_characters="HBHHBHB100s", endpacket_timeout=250
     )
     return 1
 

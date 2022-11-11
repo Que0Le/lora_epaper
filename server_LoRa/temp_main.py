@@ -107,8 +107,8 @@ def main() -> int:
                     msg=f"No such session", session_id=current_session)
                 continue
 
-            shard_id = 0
-            chunk_id = 0
+            shard_id: int = msg_json["shid"]
+            chunk_id: int = msg_json["chid"]
             # if request the same chunk and shard, check if need to abort
             if last_rqst_shard == shard_id and last_rqst_chunk == chunk_id:
                 if current_tries >= max_try:
