@@ -60,3 +60,4 @@ def send_a_struct(
     LoRa.put(send_message)
     LoRa.endPacket(endpacket_timeout)
     LoRa.wait()
+    # print("Transmit time: {0:0.2f} ms | Data rate: {1:0.2f} byte/s".format(LoRa.transmitTime(), LoRa.dataRate()))
