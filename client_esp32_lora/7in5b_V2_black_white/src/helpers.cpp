@@ -1,4 +1,4 @@
-
+#include "helpers.h"
 
 void reset_vars(int *img_rqst_sent, int *flag, int *request_status, unsigned int *written_bytes,
                 unsigned char *shard_max_length, unsigned char *nbr_chunks,
@@ -14,3 +14,5 @@ void reset_vars(int *img_rqst_sent, int *flag, int *request_status, unsigned int
     *current_chunk = -1;
     *current_shard = -1;
 }
+
+void reset_buffs();
