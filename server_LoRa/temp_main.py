@@ -103,6 +103,7 @@ def main() -> int:
                 continue
 
         if msg_type == "rqst_done" and current_session >= 1:
+            print("DONE message received. Clean up ...\n")
             chunks = []
             current_session = last_rqst_shard = last_rqst_chunk = -1
             current_tries = 0

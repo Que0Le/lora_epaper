@@ -106,8 +106,8 @@ def get_data_for_request(board_type: str, display_type: str) -> Tuple[list, int,
 
     elif display_type=="7in5_V2":
         # Prepare data
-        # filepath_to_send = random.choice(list_file_with_filter("images", "800x480_1bit", "bmp"))
-        filepath_to_send = "./images/800x480_1bit_apache.bmp"
+        filepath_to_send = random.choice(list_file_with_filter("images", "800x480_1bit", "bmp"))
+        # filepath_to_send = "./images/800x480_1bit_apache.bmp"
         bmp_raw_data = get_bmp_raw_data_from_file(filepath=filepath_to_send)
         bmp_black_corrected: list = flip_and_rotate_bmp_raw_7in5_v2(bmp_raw_data)
         total_length = len(bmp_black_corrected)
