@@ -18,7 +18,7 @@
 
 #define BUFF_LEN_7IN5 48000     //  800*480/8
 #define HOST_CODE 123           // Host ID
-#define THIS_CLIENT_ID 2
+#define THIS_CLIENT_ID 1
 #define THIS_CLIENT_CHUNKS_NBR 1    // in how many chunks is the data split 
 
 unsigned char **BUFF_IMAGES; 
@@ -76,6 +76,8 @@ void setup()
     log_d("Total PSRAM: %d", ESP.getPsramSize());
     log_d("Free PSRAM: %d", ESP.getFreePsram());
 
+    Serial.printf("Sizeof(control_struct)=%d Sizeof(packet_struct)\n", sizeof(control_struct), sizeof(packet_struct));
+
     // Init mem
     pkt = (packet_struct *)malloc(sizeof(packet_struct));
     ctrl = (control_struct *)malloc(sizeof(control_struct));
@@ -93,9 +95,24 @@ void setup()
     //     while (1);
     // }
     // for (int i=0;i<BUFF_LEN_7IN5; i++) {
-    //     BUFF_BLACK_IMAGE[i] = 0;
+    //     BUFF_IMAGES[0][i] = 0b11110000;
     // }
-    Serial.printf("Allocated mem for BUFF_IMAGES, length=%d\n", BUFF_LEN_7IN5);
+    // Serial.printf("Allocated mem for BUFF_IMAGES, length=%d\n", BUFF_LEN_7IN5);
+    // Epd epd;
+    // Serial.println("\nInit eink ...");
+    // if (epd.Init() != 0)
+    // {
+    //     Serial.print("e-Paper init failed");
+    //     return;
+    // }
+    // Serial.println("Inited eink ...");
+    // epd.Clear(); // clears the SRAM of the e-paper display
+    // epd.DisplayFrame(BUFF_IMAGES[0]);
+    // Serial.println("E paper done!");
+    // epd.Sleep(); // Deep sleep
+    // delay(5000);
+    // Serial.println("Restarting ...!");
+    // ESP.restart();
 
     /* Init loram */
     LoRa.setPins(ss, rst, dio0);
@@ -117,73 +134,84 @@ unsigned int written_bytes = 0;
 unsigned char shard_max_length = 0;
 unsigned char nbr_chunks = 0;
 unsigned int nbr_shards[1] = {0};
+unsigned int chunk_sizes_bytes[1] = {0};
 unsigned int session_id = 0;
 int current_chunk = -1;
 int current_shard = -1;
+int shard_rqst_sent = 0;
 
 void loop()
 {
-    if (img_rqst_sent==0) {
+    if (img_rqst_sent==-1) {
         // Send request
         LoRa.beginPacket();
-        LoRa.print("{\"msg_type\":\"img_rqst\",\"hid\":\"123\",\"cid\":1,\"sid\":0,\"dsp_type\":\"7in5_V2\",\"board\":\"esp32\"}");
+        LoRa.print("{\"msg_type\":\"img_rqst\",\"hid\":123,\"cid\":1,\"sid\":0,\"dt\":\"7in5_V2\",\"b\":\"esp32\"}}");
         LoRa.endPacket();
         Serial.println("Requested new image.");
         img_rqst_sent = 1;
     }
 
-    if (img_rqst_sent == 1 && flag == 1 && session_id > 0) {
-        if (current_chunk >= THIS_CLIENT_CHUNKS_NBR && current_shard >= nbr_shards[current_chunk]) {
-            // Done. TODO: send done message
-            // TODO: clean up
-        }
+    if (shard_rqst_sent == 0 && img_rqst_sent == 1 && flag == 1 && session_id > 0) {
+        // if (current_chunk >= THIS_CLIENT_CHUNKS_NBR && current_shard >= nbr_shards[current_chunk]) {
+        //     // Done. TODO: send done message
+        //     // TODO: clean up
+        // }
         // We Send request for the next chunk
         LoRa.beginPacket();
-        LoRa.printf(
-            "{\"msg_type\":\"shard_rqst\",\"hid\":%d,\"cid\":%d,\"sid\":%d,\"chid\":%d,\"shid\":%d}",
-            123, THIS_CLIENT_ID, session_id, current_chunk, current_shard);
+        LoRa.printf("{\"msg_type\":\"shard_rqst\",\"hid\":%d,\"cid\":%d,\"sid\":%d,\"chid\":%d,\"shid\":%d}}",
+                    123, THIS_CLIENT_ID, session_id, current_chunk, current_shard);
         LoRa.endPacket();
-        Serial.printf("Requested chunk=%d shard=%d\n.", current_chunk, current_shard); 
+        Serial.printf("Requested chunk=%d shard=%d\n", current_chunk, current_shard); 
+        shard_rqst_sent = 1;
     }
 
     // Handle message
     int packetSize = LoRa.parsePacket();
     if (packetSize)
     {
+        Serial.printf("Waiting for packet ...\n");
         int nbr_byte = 0;
         while (LoRa.available())
         {
             nbr_byte = LoRa.readBytes(buffer, 256);
         }
+        Serial.printf("... captured %d bytes ... \n", nbr_byte);
         if (nbr_byte == sizeof(control_struct)) {
             memcpy(ctrl, buffer, sizeof(control_struct));
+            Serial.printf("...  ctrl, request_status=%d client_id=%d shard_max_length=%d \n",
+                          ctrl->request_status, ctrl->client_id, ctrl->shard_max_length);
             // Check if this msg is for us
             if (ctrl->client_id != THIS_CLIENT_ID || ctrl->host_code != HOST_CODE || ctrl->flag != 1) {
                 return;
             }
             if (ctrl->request_status == 1) {
                 // Server accepts.
-
+                Serial.printf("Server accepts\n");
                 // Extract approvement data
-                unsigned int chunk_sizes_bytes = 0;
-                memcpy(&chunk_sizes_bytes, ctrl->message, 4);
+                unsigned int chunk_sizes_byte = 0;
+                memcpy(&chunk_sizes_byte, ctrl->message, 4);
+                Serial.printf("chunk_sizes_byte=%d\n", chunk_sizes_byte);
+                chunk_sizes_bytes[0] = chunk_sizes_byte;
                 // Get number of shards
-                if (chunk_sizes_bytes % ctrl->shard_max_length > 0) {
-                    nbr_shards[0] = chunk_sizes_bytes % ctrl->shard_max_length + 1;
+                if (chunk_sizes_byte % ctrl->shard_max_length > 0) {
+                    nbr_shards[0] = chunk_sizes_byte / ctrl->shard_max_length + 1;
                 } else {
-                    nbr_shards[0] = chunk_sizes_bytes % ctrl->shard_max_length;
+                    nbr_shards[0] = chunk_sizes_byte / ctrl->shard_max_length;
                 }
+                Serial.printf("nbr_shards[0]=%d\n", nbr_shards[0]);
                 request_status = ctrl->request_status;
                 flag = ctrl->flag;
                 session_id = ctrl->session_id;
                 // Allocate memory for the compressed data
                 for (int i = 0; i < THIS_CLIENT_CHUNKS_NBR; i++) {
-                    BUFF_COMPRESSED_IMAGES[i] = (unsigned char *)malloc(nbr_shards[i] * shard_max_length * sizeof(unsigned char));
+                    BUFF_COMPRESSED_IMAGES[i] = (unsigned char *)malloc(chunk_sizes_bytes[i] * sizeof(unsigned char));
                     if (!BUFF_COMPRESSED_IMAGES[i]) {
-                        Serial.printf("Failed alloc mem for BUFF_COMPRESSED_IMAGES, i=%d\n", i);
+                        Serial.printf("Failed alloc %d bytes for BUFF_COMPRESSED_IMAGES, i=%d\n", chunk_sizes_bytes[i], i);
                     }
+                    Serial.printf("Allocated %d bytes for BUFF_COMPRESSED_IMAGES, i=%d\n", chunk_sizes_bytes[i], i);
                 }
                 current_chunk = current_shard = 0;
+                delay(1000);
                 return;
             } else if (ctrl->request_status == 2) {
                 Serial.println("Server denied the image request.!");
@@ -191,26 +219,29 @@ void loop()
                 // TODO: cleanup
                 reset_vars(&img_rqst_sent, &flag, &request_status, &written_bytes, &shard_max_length,
                            &nbr_chunks, &session_id, &current_chunk, &current_shard);
-                reset_buffs();
+                // reset_buffs();
                 return;
             } else if (ctrl->request_status == 3) {
                 Serial.println("Server aborted the image request.!");
                 reset_vars(&img_rqst_sent, &flag, &request_status, &written_bytes, &shard_max_length,
                            &nbr_chunks, &session_id, &current_chunk, &current_shard);
-                reset_buffs();
+                // reset_buffs();
                 return;
             }
-        } else /* if (nbr_byte==sizeof(packet_struct)) */ {     // somehow size of pkt is not catched here
+        //} else if (nbr_byte==sizeof(packet_struct)) {     // somehow size of pkt is not catched here
+        } else {     // somehow size of pkt is not catched here
             memcpy(pkt, buffer, sizeof(packet_struct));
             Serial.printf("... received data: chunk_id: %d, shard_id: %d\n", pkt->chunk_id, pkt->shard_id);
             // Make sure we don't exceed the buffer
             if (pkt->chunk_id >= THIS_CLIENT_CHUNKS_NBR || pkt->shard_id>=nbr_shards[pkt->chunk_id])
                 return;
+            Serial.printf("... nbr_shards[pkt->chunk_id]: %d\n", nbr_shards[pkt->chunk_id]);
             // Calculate the correct bytes to copy. Can't always trust server!
-            size_t bytes_to_copy = (pkt->shard_id*ctrl->shard_max_length + pkt->shard_length) >= ctrl->shard_max_length
-                ? ctrl->shard_max_length - pkt->shard_id*ctrl->shard_max_length
+            size_t bytes_to_copy = (pkt->shard_id*ctrl->shard_max_length + pkt->shard_length) > chunk_sizes_bytes[current_chunk]
+                ? chunk_sizes_bytes[current_chunk] - pkt->shard_id*ctrl->shard_max_length
                 : pkt->shard_length;
-            memcpy((void *)BUFF_COMPRESSED_IMAGES[pkt->chunk_id][pkt->shard_id*ctrl->shard_max_length], pkt->data, bytes_to_copy);
+            Serial.printf("... bytes_to_copy: %d location chunk=%d shard=%d\n", bytes_to_copy, pkt->chunk_id, pkt->shard_id);
+            memcpy(&BUFF_COMPRESSED_IMAGES[pkt->chunk_id][pkt->shard_id*ctrl->shard_max_length], pkt->data, bytes_to_copy);
             written_bytes += bytes_to_copy;
             if (current_shard == nbr_shards[current_chunk] - 1) {
                 if (current_chunk < nbr_chunks -1) {
@@ -218,98 +249,67 @@ void loop()
                     current_shard = 0;
                 } else {
                     // TODO: send done signal
+                    LoRa.beginPacket();
+                    LoRa.printf("{\"msg_type\":\"rqst_done\",\"hid\":%d,\"cid\":%d,\"sid\":%d}}",
+                                123, THIS_CLIENT_ID, session_id);
+                    LoRa.endPacket();
+                    Serial.printf("Sent Done message to server\n"); 
                     // TODO: clean up
+                    Serial.printf("All chunks and shards have been requested and received!\n");
+                    // TODO: uncompress data
+                    // TODO: show image
+                    Serial.printf("Receiving done. Start decompressing data ...\n");
+                    // Serial.printf("\nwritten_bytes COMPRESSSED BLACK: %d of %d\n", written_bytes, buff_comp_len);
+                    int uncomp_success = 1;
+                    uLong uncomp_len = BUFF_LEN_7IN5;
+                    uint total_succeeded = 0;
+                    uint step = 0;
+                    int cmp_status = 0;
+                    for (int chunk_th=0; chunk_th<THIS_CLIENT_CHUNKS_NBR; chunk_th++) {
+                        cmp_status = uncompress(BUFF_IMAGES[chunk_th], &uncomp_len,
+                            (const unsigned char *)BUFF_COMPRESSED_IMAGES[chunk_th], (uLong)chunk_sizes_bytes[chunk_th]);
+
+                        total_succeeded += (cmp_status == Z_OK);
+                        if (cmp_status != Z_OK) {
+                            Serial.printf("uncompress failed!\n");
+                            uncomp_success = 0;
+                        }
+                        else {
+                            Serial.printf("Decompressed from %u to %u bytes\n",
+                                          (mz_uint32)chunk_sizes_bytes[chunk_th], (mz_uint32)uncomp_len);
+                        }
+                    }
+
+                    if (uncomp_success) {
+                        Serial.print("\nwritten_bytes BLACK: ");
+                        Serial.println(written_bytes);
+                        // Print
+                        // Start e-paper
+                        Epd epd;
+                        Serial.println("\nInit eink ...");
+                        if (epd.Init() != 0)
+                        {
+                            Serial.print("e-Paper init failed");
+                            return;
+                        }
+                        Serial.println("Inited eink ...");
+                        epd.Clear(); // clears the SRAM of the e-paper display
+                        epd.DisplayFrame(BUFF_IMAGES[0]);
+                        Serial.println("E paper done!");
+                        epd.Sleep(); // Deep sleep
+                        delay(5000);
+                        Serial.println("Restarting ...!");
+                        ESP.restart();
+                    }
+                    /// 
+                    reset_vars(&img_rqst_sent, &flag, &request_status, &written_bytes, &shard_max_length,
+                               &nbr_chunks, &session_id, &current_chunk, &current_shard);
                 }
             } else {
                 current_shard++;
             }
+            shard_rqst_sent = 0;
+            delay(1000);
         }
     }
-
-
-
-    // if (packetSize)
-    // {
-    //     // read packet
-    //     while (LoRa.available())
-    //     {
-    //         int nbr_byte = LoRa.readBytes(buffer, 256);
-    //         // Serial.print("nbr_byte: ");
-    //         if (nbr_byte==sizeof(control_struct)) { // control packet
-    //             memcpy(ctrl, buffer, sizeof(control_struct));
-    //             unsigned int temp = 0;
-    //             memcpy(&temp, ctrl->message, 4);
-    //             buff_comp_len += temp; // TODO: somehow assign with "=" didn't work!
-    //             request_status = ctrl->request_status;
-    //             Serial.printf("Got control packet ... request_status: %d\n", request_status);
-    //             if (request_status == 1) {
-    //                 if ((BUFF_COMPRESSED_BLACK_IMAGE = (unsigned char *)malloc(buff_comp_len)) == NULL) {
-    //                     printf("Failed alloc BUFF_COMPRESSED_BLACK_IMAGE...\r\n");
-    //                     while (1);
-    //                 }
-    //                 Serial.printf("Allocated mem for COMPRESSED back (%d) buff\n", buff_comp_len);
-    //             }
-    //         } else /* if (nbr_byte==sizeof(packet_struct)) */ {
-    //             memcpy(pkt, buffer, sizeof(packet_struct));
-    //             Serial.printf("... received data: index_start: %d, data_length: %d\n", pkt->index_start, pkt->data_length);
-    //             // Make sure we don't exceed the buffer
-    //             if (pkt->data_type>1 || pkt->index_start>=buff_comp_len)
-    //                 break;
-    //             // Calculate the correct bytes to copy. Can't always trust server!
-    //             size_t bytes_to_copy = (pkt->index_start + pkt->data_length) >= buff_comp_len
-    //                 ? buff_comp_len - pkt->index_start
-    //                 : pkt->data_length;
-    //             // Copy to compressed buffer
-    //             memcpy(BUFF_COMPRESSED_BLACK_IMAGE + pkt->index_start, pkt->data, bytes_to_copy);
-    //             written_bytes += bytes_to_copy;
-    //         }
-    //     }
-    // }
-
-    // // Done
-    // if (rq_sent==1 && request_status==3) {
-    //     int uncomp_success = 1;
-    //     Serial.printf("Receiving done. Start decompressing data ...\n");
-    //     Serial.printf("\nwritten_bytes COMPRESSSED BLACK: %d of %d\n", written_bytes, buff_comp_len);
-
-    //     uLong uncomp_len = BUFF_LEN_7IN5;
-    //     uint total_succeeded = 0;
-    //     uint step = 0;
-    //     int cmp_status = 0;
-    //     cmp_status = uncompress(
-    //         BUFF_BLACK_IMAGE, &uncomp_len, 
-    //         (const unsigned char *)BUFF_COMPRESSED_BLACK_IMAGE, (uLong)buff_comp_len
-    //     );
-
-    //     total_succeeded += (cmp_status == Z_OK);
-    //     if (cmp_status != Z_OK) {
-    //         Serial.printf("uncompress failed!\n");
-    //         uncomp_success = 0;
-    //     } else {
-    //         Serial.printf("Decompressed from %u to %u bytes\n", (mz_uint32)buff_comp_len, (mz_uint32)uncomp_len);
-    //     }
-
-    //     rq_sent = 0;
-    //     if (uncomp_success) {
-    //         Serial.print("\nwritten_bytes BLACK: ");
-    //         Serial.println(written_bytes);
-    //         // Print
-    //         // Start e-paper
-    //         Epd epd;
-    //         Serial.println("\nInit eink ...");
-    //         if (epd.Init() != 0)
-    //         {
-    //             Serial.print("e-Paper init failed");
-    //             return;
-    //         }
-    //         Serial.println("Inited eink ...");
-    //         epd.Clear();    // clears the SRAM of the e-paper display
-    //         epd.DisplayFrame(BUFF_BLACK_IMAGE);
-    //         Serial.println("E paper done!");
-    //         epd.Sleep();    // Deep sleep
-    //         delay(5000);
-    //         Serial.println("Restarting ...!");
-    //         ESP.restart();
-    //     }
-    // }
 }
